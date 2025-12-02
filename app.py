@@ -40,7 +40,7 @@ FEATURES = {
 # ===============================================
 # UI HEADER
 # ===============================================
-st.title("BE 2026 — ML-Driven QC")
+st.title("BE ML-Driven QC")
 
 # Mode chooser
 mode = st.radio("Select Mode:", ["Single Input", "Batch (CSV Upload)"], horizontal=True)
