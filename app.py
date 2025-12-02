@@ -54,7 +54,7 @@ mode = st.radio("Select Mode:", ["Single Input", "Batch (CSV Upload)"], horizont
 selected = st.radio("Select Target:", TARGETS, index=0, horizontal=True)
 
 # =======================================================================
-# MODE 1 — SINGLE INPUT
+# MODE 1 — SINGLE INPUT (YOUR EXISTING FUNCTION)
 # =======================================================================
 if mode == "Single Input":
     
@@ -105,10 +105,12 @@ if mode == "Single Input":
         df_input = pd.DataFrame([user_input])
         result = predict_new(df_input, out_dir=MODEL_DIR)
 
+        # filter selection
+        selected_cols = [c for c in result.columns if selected.lower() in c.lower()]
         st.subheader("Prediction Result")
-        st.dataframe(result)
+        st.dataframe(result[selected_cols])
 
-        # --- existing logic not changed ---
+        # Extract boundaries
         low_col = next((c for c in result.columns if "low" in c.lower() and selected.lower() in c.lower()), None)
         med_col = next((c for c in result.columns if "med" in c.lower() and selected.lower() in c.lower()), None)
         up_col  = next((c for c in result.columns if "up"  in c.lower() and selected.lower() in c.lower()), None)
@@ -160,8 +162,9 @@ if mode == "Single Input":
         st.plotly_chart(px.bar(bar_df, x="Category", y="Value", text="Value"), use_container_width=True)
 
 
+
 # =======================================================================
-# MODE 2 — BATCH INPUT
+# MODE 2 — BATCH INPUT (CSV UPLOAD)
 # =======================================================================
 if mode == "Batch (CSV Upload)":
 
@@ -176,14 +179,93 @@ if mode == "Batch (CSV Upload)":
 
         if st.button("Run Batch Prediction"):
 
+            # Run prediction on entire dataset
             result_batch = predict_new(df_batch, out_dir=MODEL_DIR)
 
-            st.subheader("Batch Prediction Results")
-            st.dataframe(result_batch)
+            # ALWAYS include NO_SIRI
+            if "NO_SIRI" in df_batch.columns:
+                result_batch["NO_SIRI"] = df_batch["NO_SIRI"]
 
+            # Identify prediction columns for selected target
+            low_col = next((c for c in result_batch.columns if selected.lower() in c.lower() and "low" in c.lower()), None)
+            med_col = next((c for c in result_batch.columns if selected.lower() in c.lower() and "med" in c.lower()), None)
+            up_col  = next((c for c in result_batch.columns if selected.lower() in c.lower() and "up"  in c.lower()), None)
+
+            actual_col = selected   # from original dataset
+
+            # -----------------------------------------------------
+            # CONSTRUCT CLEAN OUTPUT TABLE
+            # -----------------------------------------------------
+            clean_df = pd.DataFrame()
+            clean_df["NO_SIRI"] = df_batch["NO_SIRI"]
+            clean_df[selected] = df_batch[selected]                      # actual value
+            clean_df[f"{selected}_PRED_LOW"] = result_batch[low_col]
+            clean_df[f"{selected}_PRED_MED"] = result_batch[med_col]
+            clean_df[f"{selected}_PRED_UP"] = result_batch[up_col]
+
+            # Compute flag ONLY for this selected target
+            flags = []
+            for i in range(len(clean_df)):
+                actual = clean_df.iloc[i][selected]
+                lb = clean_df.iloc[i][f"{selected}_PRED_LOW"]
+                ub = clean_df.iloc[i][f"{selected}_PRED_UP"]
+
+                if actual < lb or actual > ub:
+                    flags.append(True)
+                else:
+                    flags.append(False)
+
+            clean_df[f"{selected}_FLAG"] = flags
+
+            # -----------------------------------------------------
+            # SPLIT INTO ISSUE / OK
+            # -----------------------------------------------------
+            df_issue = clean_df[clean_df[f"{selected}_FLAG"] == True]
+            df_ok    = clean_df[clean_df[f"{selected}_FLAG"] == False]
+
+            # -----------------------------------------------------
+            # SUMMARY
+            # -----------------------------------------------------
+            total = len(clean_df)
+            total_issue = len(df_issue)
+            total_ok = len(df_ok)
+            pct_issue = round((total_issue / total) * 100, 2) if total > 0 else 0
+            pct_ok = round((total_ok / total) * 100, 2) if total > 0 else 0
+
+            st.subheader("📊 Summary")
+            st.markdown(f"""
+            **Total records uploaded:** {total}  
+            **Records with issues:** {total_issue} ({pct_issue}%)  
+            **Records OK:** {total_ok} ({pct_ok}%)  
+            """)
+
+            # -----------------------------------------------------
+            # DISPLAY TABLES
+            # -----------------------------------------------------
+            st.subheader(f"⚠️ Records with Issues ({selected})")
+            if df_issue.empty:
+                st.success("Tiada rekod isu untuk target ini 🎉")
+            else:
+                st.dataframe(df_issue)
+
+            st.subheader(f"✅ Records without Issues ({selected})")
+            st.dataframe(df_ok)
+
+            # -----------------------------------------------------
+            # DOWNLOAD BUTTONS
+            # -----------------------------------------------------
             st.download_button(
-                "Download Results",
-                result_batch.to_csv(index=False).encode('utf-8'),
-                file_name="batch_qc_results.csv",
+                f"📥 Download Only Issues ({selected})",
+                df_issue.to_csv(index=False).encode('utf-8'),
+                file_name=f"batch_issues_only_{selected}.csv",
                 mime="text/csv"
             )
+
+            st.download_button(
+                f"📥 Download All Predictions ({selected})",
+                clean_df.to_csv(index=False).encode('utf-8'),
+                file_name=f"batch_predictions_{selected}.csv",
+                mime="text/csv"
+            )
+
+            st.success("Batch prediction completed!")
