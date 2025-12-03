@@ -12,15 +12,20 @@ def to_num(x):
     return pd.to_numeric(x, errors="coerce")
 def load_target_models(out_dir, target):
     tdir = os.path.join(out_dir, target)
+
     meta_path = os.path.join(tdir, f"meta_{target}.json")
     if not os.path.exists(meta_path):
         raise FileNotFoundError(f"Metadata for target '{target}' not found: {meta_path}")
+
     with open(meta_path, "r", encoding="utf-8") as f:
         meta = json.load(f)
-    preproc = joblib.load(meta["preproc"])
-    m_low = lgb.Booster(model_file=meta["lgb_lower"])
-    m_med = lgb.Booster(model_file=meta["lgb_median"])
-    m_up  = lgb.Booster(model_file=meta["lgb_upper"])
+
+    # IMPORTANT: join meta paths with folder
+    preproc = joblib.load(os.path.join(tdir, meta["preproc"]))
+    m_low = lgb.Booster(model_file=os.path.join(tdir, meta["lgb_lower"]))
+    m_med = lgb.Booster(model_file=os.path.join(tdir, meta["lgb_median"]))
+    m_up  = lgb.Booster(model_file=os.path.join(tdir, meta["lgb_upper"]))
+
     return preproc, m_low, m_med, m_up, meta
 def predict_new(df_new, out_dir="be_qc_models", targets=None):
     if targets is None:
