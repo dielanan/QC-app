@@ -1,32 +1,30 @@
 import streamlit as st
 import pandas as pd
-import os
 import sys
 import plotly.express as px
 import plotly.graph_objects as go
+from pathlib import Path
 
-# ===============================================
-# RELATIVE PATHS (GitHub + Streamlit Cloud safe)
-# ===============================================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# -----------------------------------------------------
+# Fix paths for GitHub / Streamlit Cloud
+# -----------------------------------------------------
+BASE_DIR = Path(__file__).resolve().parent
+sys.path.append(str(BASE_DIR))
 
-MODEL_DIR = os.path.join(BASE_DIR, "be_qc_models")
-LOOKUP_DIR = os.path.join(BASE_DIR, "lookup")
-
-# ===============================================
-# IMPORT PREDICT LIBRARY (same folder)
-# ===============================================
 from be_qc_lib_saved import predict_new
 
-# ===============================================
-# LOAD LOOKUPS
-# ===============================================
-df_hierarchy = pd.read_csv(os.path.join(LOOKUP_DIR, "lookup_sektor_subsektor_msic.csv"))
-df_nd = pd.read_csv(os.path.join(LOOKUP_DIR, "lookup_negeri_daerah.csv"))
+MODEL_DIR = BASE_DIR / "be_qc_models"
+LOOKUP = BASE_DIR / "lookup"
 
-# ===============================================
-# TARGETS & FEATURES
-# ===============================================
+# -----------------------------------------------------
+# Load lookups
+# -----------------------------------------------------
+df_hierarchy = pd.read_csv(LOOKUP / "lookup_sektor_subsektor_msic.csv")
+df_nd = pd.read_csv(LOOKUP / "lookup_negeri_daerah.csv")
+
+# -----------------------------------------------------
+# Targets + features
+# -----------------------------------------------------
 TARGETS = ["OUTPUT", "INPUT", "NILAI_DITAMBAH", "GAJI_UPAH", "JUMLAH_PEKERJA"]
 
 FEATURES = {
@@ -37,12 +35,14 @@ FEATURES = {
     "JUMLAH_PEKERJA": {"num": ["OUTPUT","INPUT","NILAI_DITAMBAH","GAJI_UPAH","HARTA_TETAP","JUMLAH_PEKERJA"]}
 }
 
-# ===============================================
-# UI HEADER
-# ===============================================
-st.title("BE ML-Driven QC")
+# -----------------------------------------------------
+# UI Header
+# -----------------------------------------------------
+st.title("BE 2026 — ML-Driven QC")
 
-# Mode chooser
+# -----------------------------------------------------
+# MODE SELECTOR
+# -----------------------------------------------------
 mode = st.radio("Select Mode:", ["Single Input", "Batch (CSV Upload)"], horizontal=True)
 selected = st.radio("Select Target:", TARGETS, index=0, horizontal=True)
 
@@ -55,6 +55,7 @@ if mode == "Single Input":
     user_input = {}
     feats = FEATURES[selected]
 
+    # Dropdown dependencies
     sektor_list = sorted(df_hierarchy["SEKTOR"].unique())
     sektor = st.sidebar.selectbox("SEKTOR", sektor_list, key=f"{selected}_sektor")
     user_input["SEKTOR"] = sektor
@@ -78,7 +79,7 @@ if mode == "Single Input":
     daerah = st.sidebar.selectbox("DAERAH", daerah_opts, key=f"{selected}_daerah")
     user_input["DAERAH"] = daerah
 
-    # numeric
+    # Numeric inputs
     for col in feats["num"]:
         key = f"{selected}_num_{col}"
         if col == "JUMLAH_PEKERJA":
@@ -96,7 +97,6 @@ if mode == "Single Input":
         st.subheader("Prediction Result")
         st.dataframe(result[selected_cols])
 
-        # Extract boundaries
         low_col = next((c for c in result.columns if "low" in c.lower() and selected.lower() in c.lower()), None)
         med_col = next((c for c in result.columns if "med" in c.lower() and selected.lower() in c.lower()), None)
         up_col  = next((c for c in result.columns if "up"  in c.lower() and selected.lower() in c.lower()), None)
@@ -132,7 +132,6 @@ if mode == "Single Input":
                 text=[f"{actual:,.2f}"],
                 textposition="top center"
             ))
-
             fig.update_layout(
                 xaxis_title=f"{selected} Value",
                 yaxis=dict(showticklabels=False),
@@ -146,6 +145,7 @@ if mode == "Single Input":
         })
         st.subheader("📊 Numeric Inputs Used")
         st.plotly_chart(px.bar(bar_df, x="Category", y="Value", text="Value"), use_container_width=True)
+
 
 # =======================================================================
 # MODE 2 — BATCH INPUT
@@ -171,6 +171,8 @@ if mode == "Batch (CSV Upload)":
             med_col = next((c for c in result_batch.columns if selected.lower() in c.lower() and "med" in c.lower()), None)
             up_col  = next((c for c in result_batch.columns if selected.lower() in c.lower() and "up"  in c.lower()), None)
 
+            actual_col = selected
+
             clean_df = pd.DataFrame()
             clean_df["NO_SIRI"] = df_batch["NO_SIRI"]
             clean_df[selected] = df_batch[selected]
@@ -193,21 +195,17 @@ if mode == "Batch (CSV Upload)":
             total = len(clean_df)
             total_issue = len(df_issue)
             total_ok = len(df_ok)
-            pct_issue = round((total_issue / total) * 100, 2)
-            pct_ok = round((total_ok / total) * 100, 2)
+            pct_issue = round((total_issue / total) * 100, 2) if total > 0 else 0
 
             st.subheader("📊 Summary")
             st.markdown(f"""
             **Total records uploaded:** {total}  
             **Records with issues:** {total_issue} ({pct_issue}%)  
-            **Records OK:** {total_ok} ({pct_ok}%)  
+            **Records OK:** {total_ok}  
             """)
 
             st.subheader(f"⚠️ Records with Issues ({selected})")
-            if df_issue.empty:
-                st.success("Tiada rekod isu untuk target ini 🎉")
-            else:
-                st.dataframe(df_issue)
+            st.dataframe(df_issue if not df_issue.empty else "Tiada rekod isu 🎉")
 
             st.subheader(f"✅ Records without Issues ({selected})")
             st.dataframe(df_ok)
